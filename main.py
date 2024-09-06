@@ -1,12 +1,16 @@
 import os
 from typing import Optional, List
-from fastapi import FastAPI, Path #Path para validar queryparams
+from fastapi import FastAPI, Path, Request, HTTPException, Depends #Path para validar queryparams
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
-
 from dotenv import load_dotenv
+from config.database import engine, Base
+from models.movie import Movie
+
 
 from auth import create_token
+from auth import validate_token
 
 load_dotenv() #carga variables de entorno
 
@@ -17,7 +21,16 @@ app.title = 'Movies WebAPI ⚡️'
 app.version = "1.0.0"
 ROUTER = 'api'
 
-class Movie(BaseModel):
+Base.metadata.create_all(bind=engine)
+
+class JWTBearer(HTTPBearer):
+    async def __call__(self, request: Request):
+        auth = await super().__call__(request)
+        data = validate_token(auth.credentials, secretKey)
+        if data['email'] != "admin@gmail.com":
+            raise HTTPException(status_code=403, detail="Credentiales invalidas")
+
+class MovieMetaObj(BaseModel):
     id: Optional[int] = None,
     title: str = Field(min_length=5)
     category: str = Field(min_length=5)
@@ -30,6 +43,7 @@ class Config:
             "category": "Scared"
             }
         }
+
 
 class User(BaseModel):
     email: str
@@ -60,7 +74,7 @@ def login (user: User):
 def message():
     return HTMLResponse('<h1>Web Api Movie list</h1>')
 
-@app.get('/movies', tags=['Movies'], response_model=List[Movie], status_code=200) #Indicar a la funcion que voy a devolver una lista
+@app.get('/movies', tags=['Movies'], response_model=List[MovieMetaObj], status_code=200, dependencies=[Depends(JWTBearer)]) #Indicar a la funcion que voy a devolver una lista
 def getMovies():
     return JSONResponse(content=movies)
 
@@ -72,7 +86,7 @@ def getMoviewId(id: int = Path(ge=1, le=2000)): # Parametros de busqueda
 
     return JSONResponse(content=[], status_code=404)
 
-@app.get('/movies/', tags=['Movies'], response_model=List[Movie], status_code=200)
+@app.get('/movies/', tags=['Movies'], response_model=List[MovieMetaObj], status_code=200)
 def getMoviesByCategories(category: str): # Parametro query
     for items in movies:
         if items["category"] == category:
