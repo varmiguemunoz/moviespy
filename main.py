@@ -1,13 +1,12 @@
 import os
 from typing import Optional, List
 from fastapi import FastAPI, Path, Request, HTTPException, Depends #Path para validar queryparams
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from config.database import engine, Base
+from config.database import engine, Base, Session
 from models.movie import Movie
-
 
 from auth import create_token
 from auth import validate_token
@@ -31,18 +30,24 @@ class JWTBearer(HTTPBearer):
             raise HTTPException(status_code=403, detail="Credentiales invalidas")
 
 class MovieMetaObj(BaseModel):
-    id: Optional[int] = None,
-    title: str = Field(min_length=5)
-    category: str = Field(min_length=5)
+    id: Optional[int] = None
+    title: str = Field(min_length=5, max_length=15)
+    overview: str = Field(min_length=15, max_length=50)
+    year: int = Field(le=2022)
+    rating:float = Field(ge=1, le=10)
+    category:str = Field(min_length=5, max_length=15)
 
-class Config:
-    json_schema_extra = {
-        "example": {
-            "id": 1,
-            "title": "Mi pelicula",
-            "category": "Scared"
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "title": "Mi película",
+                "overview": "Descripción de la película",
+                "year": 2022,
+                "rating": 9.8,
+                "category" : "Acción"
+                }
             }
-        }
 
 
 class User(BaseModel):
@@ -63,6 +68,8 @@ movies = [
     }
 ]
 
+# Authentica tu usuario
+
 @app.post('/auth/login', tags=['Auth'])
 def login (user: User):
     if user.email == "admin@gmail.com" and user.password == "1015186487":
@@ -70,43 +77,59 @@ def login (user: User):
 
     return JSONResponse(content=token, status_code=200)
 
-@app.get('/')
-def message():
-    return HTMLResponse('<h1>Web Api Movie list</h1>')
+
+# obten todas las peliculas
 
 @app.get('/movies', tags=['Movies'], response_model=List[MovieMetaObj], status_code=200, dependencies=[Depends(JWTBearer)]) #Indicar a la funcion que voy a devolver una lista
-def getMovies():
+def get_movies():
     return JSONResponse(content=movies)
 
+# obten una pelicula por el ID
+
 @app.get('/movies/{id}', tags=['Movies'], response_model=dict, status_code=200)
-def getMoviewId(id: int = Path(ge=1, le=2000)): # Parametros de busqueda
+def get_moview_id(id: int = Path(ge=1, le=2000)): # Parametros de busqueda
     for item in movies:
         if item["id"] == id:
             return JSONResponse(content=item)
 
     return JSONResponse(content=[], status_code=404)
 
+
+# obten peliculas por parametros
+
 @app.get('/movies/', tags=['Movies'], response_model=List[MovieMetaObj], status_code=200)
-def getMoviesByCategories(category: str): # Parametro query
+def get_movies_by_categories(category: str): # Parametro query
     for items in movies:
         if items["category"] == category:
             return JSONResponse(content=items)
 
     return JSONResponse(content=[], status_code=404)
 
+
+# Postea nuevas peliculas
+
 @app.post('/movies', tags=["Movies"], response_model=dict, status_code=201)
-def postMovies(movie: Movie):
-    movies.append(movie)
+def post_movies(movie: MovieMetaObj) -> dict:
+    db = Session()
+    new_movie = Movie(**movie.dict())
+    db.add(new_movie)
+    db.commit()
     return JSONResponse(content={"message": "Pelicula correctamente creada"})
 
+
+# Modificar peliculas
+
 @app.put('/movies/{id}', tags=['Movies'], response_model=dict, status_code=200)
-def update_movie(id: int, movie: Movie):
+def update_movie (id: int, movie: MovieMetaObj):
     for item in movies:
         if item["id"] == id:
 		        item['title'] = movie.title
 		        item['category'] = movie.category
 
         return JSONResponse(content={"message": "Pelicula correctamente creada"})
+
+
+# Eliminar peliculas
 
 @app.delete('/movies/{id}', tags=['Movies'], response_model=dict, status_code=200)
 def delete_movie(id: int):
